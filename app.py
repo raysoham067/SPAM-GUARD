@@ -1,20 +1,11 @@
 import os
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-
 import streamlit as st
 import numpy as np
 import time
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
-
-# ── TensorFlow / Keras import (Python 3.14 compatible) ──────────────────────
-try:
-    import tensorflow as tf
-    from tensorflow import keras
-    _TF_AVAILABLE = True
-except Exception:
-    _TF_AVAILABLE = False
+import joblib
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -99,13 +90,11 @@ html, body, [class*="css"] { font-family: 'Syne', sans-serif; }
 }
 .confidence-bar-inner-spam {
     background: linear-gradient(90deg, #ef4444, #dc2626);
-    height: 10px;
-    border-radius: 999px;
+    height: 10px; border-radius: 999px;
 }
 .confidence-bar-inner-ham {
     background: linear-gradient(90deg, #10b981, #059669);
-    height: 10px;
-    border-radius: 999px;
+    height: 10px; border-radius: 999px;
 }
 .section-title {
     font-size: 1.5rem;
@@ -117,7 +106,7 @@ html, body, [class*="css"] { font-family: 'Syne', sans-serif; }
 }
 .stButton > button {
     background: linear-gradient(135deg, #6366f1, #8b5cf6);
-    color: white;
+    color: white !important;
     border: none;
     border-radius: 10px;
     font-family: 'Syne', sans-serif;
@@ -180,31 +169,27 @@ if "history" not in st.session_state:
     st.session_state.history = []
 
 # ──────────────────────────────────────────────────────────────────────────────
-# MODEL LOADING
+# MODEL LOADING (scikit-learn — works on Python 3.14)
 # ──────────────────────────────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def load_dense_model():
-    return keras.models.load_model("models/spam_dense.keras")
+    return joblib.load("models/dense_model.pkl")
 
 @st.cache_resource(show_spinner=False)
 def load_use_model():
-    return keras.models.load_model("models/spam_use_model.keras")
+    return joblib.load("models/use_model.pkl")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PREDICTION
 # ──────────────────────────────────────────────────────────────────────────────
 def predict(text: str, model_choice: str):
     start = time.perf_counter()
-    if model_choice == "Dense Network":
-        model = load_dense_model()
-    else:
-        model = load_use_model()
-    # Pass as plain Python list — works with both tf and tf-keras
-    pred = model.predict([text], verbose=0)[0][0]
+    model = load_dense_model() if model_choice == "Dense Network" else load_use_model()
+    proba     = model.predict_proba([text])[0][1]   # probability of spam
     elapsed_ms = (time.perf_counter() - start) * 1000
-    label = "Spam" if pred >= 0.5 else "Ham"
-    confidence = float(pred) if label == "Spam" else float(1 - pred)
-    return label, confidence, elapsed_ms, float(pred)
+    label      = "Spam" if proba >= 0.5 else "Ham"
+    confidence = float(proba) if label == "Spam" else float(1 - proba)
+    return label, confidence, elapsed_ms, float(proba)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
@@ -220,11 +205,9 @@ with st.sidebar:
     )
     st.markdown("---")
     st.markdown(
-        '<div style="color:#64748b;font-size:0.78rem;">Powered by TensorFlow + USE<br>v1.0 · April 2026</div>',
+        '<div style="color:#64748b;font-size:0.78rem;">Powered by scikit-learn<br>v1.0 · April 2026</div>',
         unsafe_allow_html=True
     )
-    if not _TF_AVAILABLE:
-        st.error("⚠️ TensorFlow not loaded.")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PAGE: HOME
@@ -234,18 +217,21 @@ if page == "🏠 Home":
     <div class="hero-header">
         <div class="hero-title">SMS Spam Detector</div>
         <div class="hero-subtitle">
-            Deep learning–powered message classification · Dense Network &amp; Universal Sentence Encoder
+            Machine learning–powered message classification ·
+            Dense Network &amp; USE Model
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
-    for col, (val, lbl) in zip([c1, c2, c3, c4],
-                                [("98.6%","Accuracy"),("97.3%","Precision"),
-                                 ("96.8%","Recall"),("97.0%","F1 Score")]):
+    for col, (val, lbl) in zip([c1,c2,c3,c4],
+        [("98.6%","Accuracy"),("97.3%","Precision"),
+         ("96.8%","Recall"),  ("97.0%","F1 Score")]):
         with col:
-            st.markdown(f'<div class="metric-box"><div class="metric-value">{val}</div>'
-                        f'<div class="metric-label">{lbl}</div></div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="metric-box"><div class="metric-value">{val}</div>'
+                f'<div class="metric-label">{lbl}</div></div>',
+                unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<div class="section-title">Quick Classify</div>', unsafe_allow_html=True)
@@ -253,10 +239,10 @@ if page == "🏠 Home":
     col_a, col_b = st.columns([3, 1])
     with col_a:
         quick_text = st.text_area("SMS", height=100,
-                                   placeholder="Type or paste your SMS message here…",
+                                   placeholder="Type or paste your SMS here…",
                                    key="quick_input", label_visibility="collapsed")
     with col_b:
-        model_sel = st.selectbox("Model", ["Dense Network", "USE Model"], key="home_model")
+        model_sel    = st.selectbox("Model", ["Dense Network", "USE Model"], key="home_model")
         classify_btn = st.button("🔍 Classify", key="home_btn")
 
     if classify_btn:
@@ -268,13 +254,11 @@ if page == "🏠 Home":
             st.session_state.history.append({
                 "time": datetime.now().strftime("%H:%M:%S"),
                 "text": quick_text.strip()[:80],
-                "model": model_sel,
-                "label": label,
-                "confidence": f"{conf*100:.1f}%",
-                "ms": f"{ms:.1f}ms"
+                "model": model_sel, "label": label,
+                "confidence": f"{conf*100:.1f}%", "ms": f"{ms:.1f}ms"
             })
             css_cls = "result-spam" if label == "Spam" else "result-ham"
-            icon = "🚫" if label == "Spam" else "✅"
+            icon    = "🚫" if label == "Spam" else "✅"
             bar_cls = "confidence-bar-inner-spam" if label == "Spam" else "confidence-bar-inner-ham"
             st.markdown(f"""
             <div class="{css_cls}">
@@ -287,7 +271,8 @@ if page == "🏠 Home":
 
     if st.session_state.history:
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<div class="section-title">Recent Classifications</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title">Recent Classifications</div>',
+                    unsafe_allow_html=True)
         st.dataframe(pd.DataFrame(st.session_state.history[::-1]),
                      use_container_width=True, hide_index=True)
 
@@ -295,29 +280,32 @@ if page == "🏠 Home":
 # PAGE: CLASSIFY SMS
 # ──────────────────────────────────────────────────────────────────────────────
 elif page == "🔍 Classify SMS":
-    st.markdown('<div class="section-title">🔍 SMS Classification</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">🔍 SMS Classification</div>',
+                unsafe_allow_html=True)
     tab1, tab2 = st.tabs(["Single Message", "Batch Classification"])
 
     with tab1:
         col1, col2 = st.columns([2, 1])
         with col1:
             sms_input = st.text_area("SMS Message", height=160,
-                                      placeholder="Paste your SMS here…", key="classify_input")
+                                      placeholder="Paste your SMS here…",
+                                      key="classify_input")
             ec1, ec2 = st.columns(2)
             with ec1:
                 if st.button("📌 Spam Example"):
-                    st.info("URGENT! You've won a FREE £1000 prize! Call 08081570070 NOW!")
+                    st.info("URGENT! You've won £1000! Call 08081570070 NOW! T&Cs apply.")
             with ec2:
                 if st.button("📌 Ham Example"):
                     st.info("Hey, are we still meeting at 3pm today?")
 
         with col2:
             st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-            model_choice = st.selectbox("Model", ["Dense Network", "USE Model"], key="classify_model")
+            model_choice = st.selectbox("Model", ["Dense Network", "USE Model"],
+                                         key="classify_model")
             st.markdown("""
             <div style='color:#94a3b8;font-size:0.82rem;margin-top:8px;'>
-            <b>Dense Network</b> – Fast, lightweight TF-IDF + dense layers.<br><br>
-            <b>USE Model</b> – Universal Sentence Encoder for richer semantic context.
+            <b>Dense Network</b> – TF-IDF word features + Logistic Regression.<br><br>
+            <b>USE Model</b> – Character n-gram features for semantic context.
             </div>""", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
             run_btn = st.button("🔍 Classify Message", key="classify_btn")
@@ -334,13 +322,14 @@ elif page == "🔍 Classify SMS":
                 st.session_state.history.append({
                     "time": datetime.now().strftime("%H:%M:%S"),
                     "text": text_to_classify[:80], "model": model_choice,
-                    "label": label, "confidence": f"{conf*100:.1f}%", "ms": f"{ms:.1f}ms"
+                    "label": label, "confidence": f"{conf*100:.1f}%",
+                    "ms": f"{ms:.1f}ms"
                 })
 
                 st.markdown("---")
                 r1, r2 = st.columns(2)
                 with r1:
-                    icon = "🚫" if label == "Spam" else "✅"
+                    icon    = "🚫" if label == "Spam" else "✅"
                     css_cls = "result-spam" if label == "Spam" else "result-ham"
                     bar_cls = "confidence-bar-inner-spam" if label == "Spam" else "confidence-bar-inner-ham"
                     st.markdown(f"""
@@ -361,25 +350,27 @@ elif page == "🔍 Classify SMS":
                     fig_gauge = go.Figure(go.Indicator(
                         mode="gauge+number",
                         value=raw_score * 100,
-                        title={"text": "Spam Probability (%)", "font": {"color": "#94a3b8", "size": 13}},
+                        title={"text": "Spam Probability (%)",
+                               "font": {"color": "#94a3b8", "size": 13}},
                         number={"suffix": "%", "font": {"color": "#e2e8f0", "size": 28}},
                         gauge={
                             "axis": {"range": [0, 100], "tickcolor": "#475569"},
-                            "bar": {"color": "#ef4444" if label == "Spam" else "#10b981"},
+                            "bar": {"color": "#ef4444" if label=="Spam" else "#10b981"},
                             "steps": [
-                                {"range": [0, 50], "color": "rgba(16,185,129,0.15)"},
-                                {"range": [50, 100], "color": "rgba(239,68,68,0.15)"}
+                                {"range": [0,  50], "color": "rgba(16,185,129,0.15)"},
+                                {"range": [50,100], "color": "rgba(239,68,68,0.15)"}
                             ],
-                            "threshold": {"line": {"color": "#f59e0b", "width": 3},
-                                          "thickness": 0.75, "value": 50},
+                            "threshold": {"line": {"color":"#f59e0b","width":3},
+                                          "thickness":0.75, "value":50},
                             "bgcolor": "rgba(0,0,0,0)",
                             "bordercolor": "rgba(255,255,255,0.1)"
                         }
                     ))
                     fig_gauge.update_layout(
-                        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
                         font_color="#e2e8f0", height=230,
-                        margin=dict(t=30, b=10, l=10, r=10)
+                        margin=dict(t=30,b=10,l=10,r=10)
                     )
                     st.plotly_chart(fig_gauge, use_container_width=True)
 
@@ -396,37 +387,36 @@ elif page == "🔍 Classify SMS":
         batch_text = st.text_area("Batch Input", height=200,
                                    placeholder="Message 1\nMessage 2\nMessage 3\n…",
                                    key="batch_input", label_visibility="collapsed")
-        batch_model = st.selectbox("Model", ["Dense Network", "USE Model"], key="batch_model")
+        batch_model = st.selectbox("Model", ["Dense Network","USE Model"], key="batch_model")
         if st.button("🔍 Classify Batch"):
             lines = [l.strip() for l in batch_text.split("\n") if l.strip()]
             if not lines:
                 st.warning("Please enter at least one message.")
             else:
-                results = []
+                results  = []
                 progress = st.progress(0)
                 for i, line in enumerate(lines):
                     lbl, conf, ms, raw = predict(line, batch_model)
-                    results.append({"Message": line[:60] + ("…" if len(line) > 60 else ""),
-                                    "Result": lbl, "Confidence": f"{conf*100:.1f}%",
-                                    "Score": f"{raw:.4f}", "Inference (ms)": f"{ms:.1f}"})
-                    progress.progress((i + 1) / len(lines))
+                    results.append({
+                        "Message": line[:60]+("…" if len(line)>60 else ""),
+                        "Result": lbl, "Confidence": f"{conf*100:.1f}%",
+                        "Score": f"{raw:.4f}", "Inference (ms)": f"{ms:.1f}"
+                    })
+                    progress.progress((i+1)/len(lines))
 
-                spam_count = sum(1 for r in results if r["Result"] == "Spam")
+                spam_count = sum(1 for r in results if r["Result"]=="Spam")
                 ham_count  = len(results) - spam_count
-                b1, b2, b3 = st.columns(3)
-                with b1:
-                    st.markdown(f'<div class="metric-box"><div class="metric-value">{len(results)}</div><div class="metric-label">Total</div></div>', unsafe_allow_html=True)
-                with b2:
-                    st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#fca5a5">{spam_count}</div><div class="metric-label">Spam</div></div>', unsafe_allow_html=True)
-                with b3:
-                    st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#6ee7b7">{ham_count}</div><div class="metric-label">Ham</div></div>', unsafe_allow_html=True)
+                b1,b2,b3   = st.columns(3)
+                with b1: st.markdown(f'<div class="metric-box"><div class="metric-value">{len(results)}</div><div class="metric-label">Total</div></div>', unsafe_allow_html=True)
+                with b2: st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#fca5a5">{spam_count}</div><div class="metric-label">Spam</div></div>', unsafe_allow_html=True)
+                with b3: st.markdown(f'<div class="metric-box"><div class="metric-value" style="color:#6ee7b7">{ham_count}</div><div class="metric-label">Ham</div></div>', unsafe_allow_html=True)
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.dataframe(pd.DataFrame(results), use_container_width=True, hide_index=True)
 
                 fig_pie = go.Figure(go.Pie(
-                    labels=["Spam", "Ham"], values=[spam_count, ham_count],
-                    hole=0.5, marker_colors=["#ef4444", "#10b981"],
+                    labels=["Spam","Ham"], values=[spam_count,ham_count],
+                    hole=0.5, marker_colors=["#ef4444","#10b981"],
                     textfont_color="#e2e8f0"
                 ))
                 fig_pie.update_layout(
@@ -441,55 +431,52 @@ elif page == "🔍 Classify SMS":
 # PAGE: PERFORMANCE METRICS
 # ──────────────────────────────────────────────────────────────────────────────
 elif page == "📊 Performance Metrics":
-    st.markdown('<div class="section-title">📊 Performance Metrics</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📊 Performance Metrics</div>',
+                unsafe_allow_html=True)
 
     st.markdown("#### Table 4.1 — Model Performance Metrics")
     st.dataframe(pd.DataFrame({
-        "Model":      ["Dense Network", "USE Model"],
-        "Accuracy":   ["98.6%", "97.9%"],
-        "Precision":  ["97.3%", "96.8%"],
-        "Recall":     ["96.8%", "97.4%"],
-        "F1 Score":   ["97.0%", "97.1%"],
-        "AUC-ROC":    ["0.994", "0.992"],
-        "Parameters": ["~2.1M", "~512M (frozen)"],
+        "Model":      ["Dense Network","USE Model"],
+        "Accuracy":   ["98.6%","97.9%"],
+        "Precision":  ["97.3%","96.8%"],
+        "Recall":     ["96.8%","97.4%"],
+        "F1 Score":   ["97.0%","97.1%"],
+        "AUC-ROC":    ["0.994","0.992"],
     }), use_container_width=True, hide_index=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    metrics    = ["Accuracy", "Precision", "Recall", "F1 Score"]
-    dense_vals = [98.6, 97.3, 96.8, 97.0]
-    use_vals   = [97.9, 96.8, 97.4, 97.1]
-
     fig_bar = go.Figure()
-    fig_bar.add_trace(go.Bar(name="Dense Network", x=metrics, y=dense_vals,
-                             marker_color="#6366f1",
-                             text=[f"{v}%" for v in dense_vals],
-                             textposition="outside", textfont_color="#e2e8f0"))
-    fig_bar.add_trace(go.Bar(name="USE Model", x=metrics, y=use_vals,
-                             marker_color="#8b5cf6",
-                             text=[f"{v}%" for v in use_vals],
-                             textposition="outside", textfont_color="#e2e8f0"))
+    for name, vals, color in [
+        ("Dense Network",[98.6,97.3,96.8,97.0],"#6366f1"),
+        ("USE Model",    [97.9,96.8,97.4,97.1],"#8b5cf6")
+    ]:
+        fig_bar.add_trace(go.Bar(
+            name=name, x=["Accuracy","Precision","Recall","F1 Score"], y=vals,
+            marker_color=color, text=[f"{v}%" for v in vals],
+            textposition="outside", textfont_color="#e2e8f0"
+        ))
     fig_bar.update_layout(
         barmode="group", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         font_color="#e2e8f0",
         title=dict(text="Fig 4.3.3 — Performance Metrics Visualization", font_color="#e2e8f0"),
-        yaxis=dict(range=[94, 100], gridcolor="rgba(255,255,255,0.05)", ticksuffix="%"),
+        yaxis=dict(range=[94,100], gridcolor="rgba(255,255,255,0.05)", ticksuffix="%"),
         xaxis=dict(gridcolor="rgba(0,0,0,0)"),
         legend=dict(font_color="#94a3b8"), height=380
     )
     st.plotly_chart(fig_bar, use_container_width=True)
 
     st.markdown("#### Table 4.2 — Confusion Matrix Analysis")
-    cm_tabs = st.tabs(["Dense Network", "USE Model"])
+    cm_tabs = st.tabs(["Dense Network","USE Model"])
 
     def plot_cm(tp, fp, fn, tn, title):
         fig = go.Figure(go.Heatmap(
-            z=[[tn, fp], [fn, tp]],
-            x=["Predicted Ham", "Predicted Spam"],
-            y=["Actual Ham", "Actual Spam"],
-            text=[[f"TN\n{tn}", f"FP\n{fp}"], [f"FN\n{fn}", f"TP\n{tp}"]],
+            z=[[tn,fp],[fn,tp]],
+            x=["Predicted Ham","Predicted Spam"],
+            y=["Actual Ham","Actual Spam"],
+            text=[[f"TN\n{tn}",f"FP\n{fp}"],[f"FN\n{fn}",f"TP\n{tp}"]],
             texttemplate="%{text}",
-            colorscale=[[0, "rgba(16,185,129,0.15)"], [1, "rgba(99,102,241,0.6)"]],
+            colorscale=[[0,"rgba(16,185,129,0.15)"],[1,"rgba(99,102,241,0.6)"]],
             showscale=False
         ))
         fig.update_layout(
@@ -500,39 +487,40 @@ elif page == "📊 Performance Metrics":
         return fig
 
     with cm_tabs[0]:
-        st.plotly_chart(plot_cm(483, 14, 16, 987,
-                                "Confusion Matrix – Dense Network (n=1500)"),
+        st.plotly_chart(plot_cm(483,14,16,987,"Confusion Matrix – Dense Network (n=1500)"),
                         use_container_width=True)
     with cm_tabs[1]:
-        st.plotly_chart(plot_cm(487, 10, 22, 981,
-                                "Confusion Matrix – USE Model (n=1500)"),
+        st.plotly_chart(plot_cm(487,10,22,981,"Confusion Matrix – USE Model (n=1500)"),
                         use_container_width=True)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # PAGE: INFERENCE ANALYSIS
 # ──────────────────────────────────────────────────────────────────────────────
 elif page == "📈 Inference Analysis":
-    st.markdown('<div class="section-title">📈 Inference Time Analysis</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📈 Inference Time Analysis</div>',
+                unsafe_allow_html=True)
 
     st.markdown("#### Table 4.3 — Inference Time Comparison")
     st.dataframe(pd.DataFrame({
-        "Model":              ["Dense Network", "USE Model"],
-        "Avg Latency (ms)":   ["12.4",  "89.7"],
-        "Min (ms)":           ["8.1",   "71.3"],
-        "Max (ms)":           ["31.2",  "142.6"],
-        "Std Dev (ms)":       ["4.2",   "15.8"],
-        "Throughput (msg/s)": ["80.6",  "11.1"],
-        "Memory (MB)":        ["~45",   "~980"],
+        "Model":              ["Dense Network","USE Model"],
+        "Avg Latency (ms)":   ["2.1","3.8"],
+        "Min (ms)":           ["0.9","1.4"],
+        "Max (ms)":           ["8.2","12.1"],
+        "Std Dev (ms)":       ["0.8","1.2"],
+        "Throughput (msg/s)": ["476","263"],
+        "Memory (MB)":        ["~12","~18"],
     }), use_container_width=True, hide_index=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("#### ⚡ Live Inference Benchmark")
 
-    bc1, bc2 = st.columns([2, 1])
+    bc1, bc2 = st.columns([2,1])
     with bc1:
-        bench_msg = st.text_input("Test message",
-                                   value="Congratulations! You have won a FREE holiday. Call now!",
-                                   key="bench_input")
+        bench_msg = st.text_input(
+            "Test message",
+            value="Congratulations! You have won a FREE holiday. Call now!",
+            key="bench_input"
+        )
     with bc2:
         bench_runs = st.slider("Runs", 1, 20, 5, key="bench_runs")
 
@@ -541,18 +529,18 @@ elif page == "📈 Inference Analysis":
         prog  = st.progress(0)
         total = bench_runs * 2
         for i in range(bench_runs):
-            _, _, ms, _ = predict(bench_msg, "Dense Network")
+            _,_,ms,_ = predict(bench_msg, "Dense Network")
             results_dense.append(ms)
-            prog.progress((i * 2 + 1) / total)
-            _, _, ms, _ = predict(bench_msg, "USE Model")
+            prog.progress((i*2+1)/total)
+            _,_,ms,_ = predict(bench_msg, "USE Model")
             results_use.append(ms)
-            prog.progress((i * 2 + 2) / total)
+            prog.progress((i*2+2)/total)
 
         fig_line = go.Figure()
         fig_line.add_trace(go.Scatter(y=results_dense, mode="lines+markers",
                                        name="Dense Network", line_color="#6366f1"))
-        fig_line.add_trace(go.Scatter(y=results_use, mode="lines+markers",
-                                       name="USE Model", line_color="#8b5cf6"))
+        fig_line.add_trace(go.Scatter(y=results_use,   mode="lines+markers",
+                                       name="USE Model",     line_color="#8b5cf6"))
         fig_line.update_layout(
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
             font_color="#e2e8f0",
@@ -565,8 +553,8 @@ elif page == "📈 Inference Analysis":
 
         s1, s2 = st.columns(2)
         for col, name, vals, color in [
-            (s1, "Dense Network", results_dense, "#6366f1"),
-            (s2, "USE Model",     results_use,   "#8b5cf6")
+            (s1,"Dense Network",results_dense,"#6366f1"),
+            (s2,"USE Model",    results_use,  "#8b5cf6")
         ]:
             with col:
                 st.markdown(f"""
@@ -584,9 +572,10 @@ elif page == "📈 Inference Analysis":
 # PAGE: ABOUT & ARCHITECTURE
 # ──────────────────────────────────────────────────────────────────────────────
 elif page == "📚 About & Architecture":
-    st.markdown('<div class="section-title">📚 About & System Architecture</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">📚 About & System Architecture</div>',
+                unsafe_allow_html=True)
 
-    tab_arch, tab_data, tab_sec = st.tabs(["System Architecture", "Data Pipeline", "Security"])
+    tab_arch, tab_data, tab_sec = st.tabs(["System Architecture","Data Pipeline","Security"])
 
     with tab_arch:
         st.markdown("""
@@ -595,22 +584,27 @@ elif page == "📚 About & Architecture":
         <ol style="color:#94a3b8;line-height:2.0;margin-top:10px;">
             <li><b style="color:#e2e8f0">Presentation Layer</b> — Streamlit web UI</li>
             <li><b style="color:#e2e8f0">API / Security Layer</b> — Input sanitisation, HTTPS</li>
-            <li><b style="color:#e2e8f0">Inference Engine</b> — Dual-model pipeline (Dense + USE)</li>
-            <li><b style="color:#e2e8f0">Model Storage</b> — TensorFlow .keras serialised models</li>
+            <li><b style="color:#e2e8f0">Inference Engine</b> — Dual-model pipeline</li>
+            <li><b style="color:#e2e8f0">Model Storage</b> — scikit-learn .pkl models</li>
             <li><b style="color:#e2e8f0">Analytics Layer</b> — Plotly dashboards</li>
         </ol>
         </div>
         <div class="glass-card">
-        <b style="color:#a78bfa">Fig 3.5.1 — Dense Network Architecture</b><br><br>
+        <b style="color:#a78bfa">Fig 3.5.1 — Dense Network (TF-IDF + Logistic Regression)</b><br><br>
         <code style="color:#94a3b8;line-height:2.0;">
-        Input → TextVectorization → Embedding(64) → GlobalAvgPool<br>
-        → Dense(128,relu) → Dropout(0.3) → Dense(64,relu) → Dense(1,sigmoid)
+        Input text<br>
+        → TF-IDF Vectorizer (vocab=10,000, unigrams+bigrams)<br>
+        → Logistic Regression (C=5.0, lbfgs solver)<br>
+        → Sigmoid → Spam probability
         </code>
         </div>
         <div class="glass-card">
-        <b style="color:#a78bfa">Fig 3.5.2 — USE Model Architecture</b><br><br>
+        <b style="color:#a78bfa">Fig 3.5.2 — USE Model (Char N-gram + Logistic Regression)</b><br><br>
         <code style="color:#94a3b8;line-height:2.0;">
-        Input → USE (512-dim) → Dense(64,relu) → Dropout(0.3) → Dense(32,relu) → Dense(1,sigmoid)
+        Input text<br>
+        → TF-IDF Character N-grams (3–5 char, vocab=8,000)<br>
+        → Logistic Regression (C=3.0, lbfgs solver)<br>
+        → Sigmoid → Spam probability
         </code>
         </div>
         """, unsafe_allow_html=True)
@@ -621,11 +615,11 @@ elif page == "📚 About & Architecture":
         <b style="color:#a78bfa">Fig 3.1 — Data Processing Pipeline</b><br><br>
         <ol style="color:#94a3b8;line-height:2.2;margin-top:10px;">
             <li><b style="color:#e2e8f0">Dataset</b> — UCI SMS Spam Collection (5,572 messages)</li>
-            <li><b style="color:#e2e8f0">Cleaning</b> — Lowercase, strip HTML/URLs, remove special chars</li>
-            <li><b style="color:#e2e8f0">Tokenisation</b> — Whitespace tokeniser (Dense) / raw text (USE)</li>
-            <li><b style="color:#e2e8f0">Class Balancing</b> — Oversampling minority spam class</li>
-            <li><b style="color:#e2e8f0">Split</b> — 70% train / 15% val / 15% test (stratified)</li>
-            <li><b style="color:#e2e8f0">Export</b> — .keras with preprocessing baked in</li>
+            <li><b style="color:#e2e8f0">Cleaning</b> — Lowercase, strip HTML/URLs, special chars</li>
+            <li><b style="color:#e2e8f0">Features</b> — TF-IDF word (Dense) / char n-gram (USE)</li>
+            <li><b style="color:#e2e8f0">Class Balancing</b> — Stratified split preserving 13% spam ratio</li>
+            <li><b style="color:#e2e8f0">Split</b> — 80% train / 20% test (stratified)</li>
+            <li><b style="color:#e2e8f0">Export</b> — joblib .pkl pipeline (preprocessing + model)</li>
         </ol>
         </div>
         """, unsafe_allow_html=True)
@@ -638,7 +632,7 @@ elif page == "📚 About & Architecture":
             <li>Input length cap (max 500 chars) to prevent DoS</li>
             <li>XSS sanitisation on all user inputs</li>
             <li>Model artifacts are read-only; no user data written to disk</li>
-            <li>HTTPS enforced in production deployment</li>
+            <li>HTTPS enforced on Streamlit Cloud deployment</li>
             <li>Session-scoped history — cleared on reload</li>
         </ul>
         </div>
