@@ -144,3 +144,5 @@ Input text
 
 ## 📄 License
 Academic project — for educational use only.
+
+Live Demo :- https://spam-guard-3aevtyz7vi3appp3e2vq2k.streamlit.app/
